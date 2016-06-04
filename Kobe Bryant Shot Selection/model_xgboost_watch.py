@@ -74,6 +74,9 @@ def ireplace(x):
 
 
 def data_processing(train,test):
+    # if os.path.exists('features/train_features.csv') and os.path.exists('features/test_features.csv')
+
+
     features=[]
     #deleted=[]
     for data in [train,test]:
@@ -137,6 +140,9 @@ def data_processing(train,test):
         test[col]=scaler.transform(test[col])
 
     # print(train[features])
+    # train.to_csv("train_features.csv",index=None)
+    # test.to_csv("test_features.csv",index=None)
+    # print(features)
     return train,test,features
 
 
@@ -179,25 +185,35 @@ def XG_boost(train,test,features):
     #           'min_child_weight':3, 'subsample':0.5,'colsample_bytree':0.5, 'nthread':4}
     # num_rounds = 290
 
-    params = {'max_depth':8, 'eta':0.05,'silent':1,
+    params = {'max_depth':8, 'eta':0.02,'silent':1,
               'objective':'binary:logistic', 'eval_metric': 'logloss',
-              'min_child_weight':3, 'subsample':0.5,'colsample_bytree':0.5, 'nthread':8}
-    num_rounds = 250
+              'min_child_weight':4, 'subsample':0.6,'colsample_bytree':0.6}
+    num_rounds = 192
+    n_samples=train.shape[0]
+    shuffled_index=np.arange(n_samples)
+    np.random.shuffle(shuffled_index)
+    train_index=shuffled_index[:int(n_samples*.8)]
+    dev_index=shuffled_index[int(n_samples*.8):]
 
+    print(train.shape)
+    print(train.loc[train_index,features].shape)
+    print(train.loc[dev_index,features].shape)
 
-    xgbtrain = xgb.DMatrix(train[features], label=train[target])
+    xgbtrain = xgb.DMatrix(train.loc[train_index,features], label=train.loc[train_index,target])
+    xgbdev = xgb.DMatrix(train.loc[dev_index,features], label=train.loc[dev_index,target])
+
     dtest=xgb.DMatrix(test[features])
-    print("Start Cross Validation",time.ctime())
+    # print("Start Cross Validation",time.ctime())
 
 
-    cv_results=xgb.cv(params, xgbtrain, num_rounds, nfold=5,metrics={'logloss'}, seed = 0)
-    print(cv_results)
-    cv_results.to_csv('models/epoch_score.csv')
+    # cv_results=xgb.cv(params, xgbtrain, num_rounds, nfold=5,metrics={'logloss'}, seed = 0)
+    # print(cv_results)
+    # cv_results.to_csv('models/epoch_score.csv')
     print("Start Training",time.ctime())
 
-    watchlist = [(dtest,'eval'), (xgbtrain,'train')]
+    watchlist = [(xgbdev,'eval'), (xgbtrain,'train')]
     evals_result = {}
-    classifier = xgb.train(params, xgbtrain, num_rounds)
+    classifier = xgb.train(params, xgbtrain, num_rounds, watchlist, early_stopping_rounds=30)
 
     print("Start Predicting",time.ctime())
 
@@ -214,7 +230,7 @@ def XG_boost(train,test,features):
     importance = classifier.get_fscore()
     importance = sorted(importance.items(), key=operator.itemgetter(1))
     df = pd.DataFrame(importance, columns=['feature', 'fscore'])
-    df.to_csv('results/importance.csv',index=False)
+    df.to_csv('models/importance.csv',index=False)
 
 
 if __name__ == '__main__':
