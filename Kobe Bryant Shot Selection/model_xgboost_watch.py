@@ -16,7 +16,7 @@ import warnings
 import random
 warnings.filterwarnings("ignore")
 
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 
 # import matplotlib.pyplot as plt
 
@@ -37,8 +37,6 @@ def load_data():
     test=data[data[target].isnull()].reset_index(drop=True)
 
     print(train.info())
-
-
     print(test.info())
 
     return data,train,test
@@ -88,6 +86,7 @@ def data_processing(train,test):
         data['season']=data['season'].apply(lambda x: int(x.split('-')[1]))
         data['is_host']=data['matchup'].apply(lambda x: 1 if '@' in x else 0)
         data['shot_type']=data['shot_type'].apply(lambda x: 1 if '2' in x else 0)
+        data['is_addTime']=data['period'].apply(lambda x:1 if x>4 else 0)
 
     # print(train['first_action_type'].unique())
 
@@ -126,14 +125,14 @@ def data_processing(train,test):
     #     test[col]=le.transform(test[col])
 
 
-    features+=['loc_x','loc_y','period','minutes_remaining','seconds_remaining','shot_distance','month','year','day','season','range','is_host','shot_type']
+    features+=['loc_x','loc_y','period','minutes_remaining','seconds_remaining','shot_distance','month','year','day','season','range','is_host','shot_type','is_addTime']
 
     #deleted=[,]
-    print(train.columns.tolist())
+    # print(train.columns.tolist())
     # print(train['Hook Shot'].unique())
 
-    print("Standard Scalaer",time.ctime())
-    scaler=StandardScaler()
+    print("MinMax Scaler",time.ctime())
+    scaler=MinMaxScaler()
     for col in features:
         scaler.fit(list(train[col])+list(test[col]))
         train[col]=scaler.transform(train[col])
@@ -185,19 +184,20 @@ def XG_boost(train,test,features):
     #           'min_child_weight':3, 'subsample':0.5,'colsample_bytree':0.5, 'nthread':4}
     # num_rounds = 290
 
-    params = {'max_depth':8, 'eta':0.02,'silent':1,
+    params = {'max_depth':9, 'eta':0.015,'silent':1,
               'objective':'binary:logistic', 'eval_metric': 'logloss',
               'min_child_weight':4, 'subsample':0.6,'colsample_bytree':0.6}
-    num_rounds = 192
+    num_rounds = 300
     n_samples=train.shape[0]
     shuffled_index=np.arange(n_samples)
     np.random.shuffle(shuffled_index)
-    train_index=shuffled_index[:int(n_samples*.8)]
-    dev_index=shuffled_index[int(n_samples*.8):]
+    train_index=shuffled_index[:int(n_samples*.7)]
+    dev_index=shuffled_index[int(n_samples*.7):]
 
-    print(train.shape)
-    print(train.loc[train_index,features].shape)
-    print(train.loc[dev_index,features].shape)
+    print(train.shape,np.sum(train[target]==1))
+    # print(train.loc[train_index,features].shape)
+    dev=train.loc[dev_index,target]
+    print(dev.shape,np.sum(dev==1))
 
     xgbtrain = xgb.DMatrix(train.loc[train_index,features], label=train.loc[train_index,target])
     xgbdev = xgb.DMatrix(train.loc[dev_index,features], label=train.loc[dev_index,target])
@@ -213,7 +213,7 @@ def XG_boost(train,test,features):
 
     watchlist = [(xgbdev,'eval'), (xgbtrain,'train')]
     evals_result = {}
-    classifier = xgb.train(params, xgbtrain, num_rounds, watchlist, early_stopping_rounds=30)
+    classifier = xgb.train(params, xgbtrain, num_rounds, watchlist)
 
     print("Start Predicting",time.ctime())
 
@@ -225,10 +225,11 @@ def XG_boost(train,test,features):
 
     classifier.dump_model('models/dump.raw.txt')
     # xgb.plot_importance(classifier)
-    print(classifier.get_fscore())
+    # print(classifier.get_fscore())
 
     importance = classifier.get_fscore()
     importance = sorted(importance.items(), key=operator.itemgetter(1))
+    print(importance)
     df = pd.DataFrame(importance, columns=['feature', 'fscore'])
     df.to_csv('models/importance.csv',index=False)
 
@@ -236,6 +237,6 @@ def XG_boost(train,test,features):
 if __name__ == '__main__':
     data,train,test=load_data()
     # iplot(data)
-    print(test.head())
-    train,test,features=data_processing(train,test)
+    # print(test.head())
+    # train,test,features=data_processing(train,test)
     XG_boost(train,test,features)

@@ -10,13 +10,14 @@ import time
 from sklearn.metrics import log_loss
 import operator
 import warnings
+import os
 warnings.filterwarnings("ignore")
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 sample = False
 target='Category'
-fileName='hadoop1_060223'
+fileName='hadoop3_060416'
 
 def load_data():
     if sample:
@@ -78,6 +79,15 @@ def data_processing(train,test):
 
 
     features=[]
+    if os.path.exists("features/train_features.csv"):
+        train=pd.read_csv("features/train_features.csv")
+        test=pd.read_csv("features/test_features.csv")
+        ifile=open("features/features.csv",'r')
+        for line in ifile:
+            features.append(line.strip())
+        ifile.close()
+        print(features)
+        return train,test,features
 
     print("Adding Features",time.ctime())
 
@@ -114,18 +124,7 @@ def data_processing(train,test):
         train = pd.concat([train, train_encoded], axis=1)
         test = pd.concat([test,test_encoded],axis=1)
 
-    # way_name_dummies=pd.get_dummies(train['wayName'],prefix='wayName',columns=wayNames)
-    # features += list(way_name_dummies.columns)
-    # print(way_name_dummies.columns)
-    # train.join(way_name_dummies)
-    # way_name_dummies=pd.get_dummies(test['wayName'],prefix='wayName',columns=wayNames)
-    # test.join(way_name_dummies)
 
-    # print(train[['Address','StreetNo']])
-
-    # print("Filling NAs",time.ctime())
-    # train = train.fillna(train.median().iloc[0])
-    # test = test.fillna(test.median().iloc[0])
 
 
     print(train[features].head())
@@ -148,35 +147,53 @@ def data_processing(train,test):
         train[col]=scaler.transform(train[col])
         test[col]=scaler.transform(test[col])
 
+    train.to_csv("features/train_features.csv",index=None)
+    test.to_csv("features/test_features.csv",index=None)
+    ifile=open("features/features.csv",'w')
+    for feature in features:
+        ifile.write(feature+"\n")
+    ifile.close()
+
+
     return train,test,features
 
 def XG_boost(train,test,features):
-    params = {'max_depth':8, 'eta':0.02, 'silent':1,
+    params = {'max_depth':8, 'eta':0.1, 'silent':1,
               'objective':'multi:softprob', 'num_class':39, 'eval_metric':'mlogloss',
-              'min_child_weight':3, 'subsample':0.6,'colsample_bytree':0.6, 'nthread':4}
-    num_rounds = 800
+              'min_child_weight':3, 'subsample':0.5,'colsample_bytree':0.5}
+    num_rounds = 500
 
     print(params.items())
+    print("num_rounds = ",num_rounds)
 
 
-    xgbtrain = xgb.DMatrix(train[features], label=train[target])
+    n_samples=train.shape[0]
+    shuffled_index=np.arange(n_samples)
+    np.random.shuffle(shuffled_index)
+    train_index=shuffled_index[:int(n_samples*.75)]
+    dev_index=shuffled_index[int(n_samples*.75):]
+
+    xgbtrain = xgb.DMatrix(train.loc[train_index,features], label=train.loc[train_index,target])
+    xgbdev = xgb.DMatrix(train.loc[dev_index,features], label=train.loc[dev_index,target])
+
     dtest=xgb.DMatrix(test[features])
 
-    print("Start Cross Validation",time.ctime())
-    cv_results=xgb.cv(params, xgbtrain, num_rounds, nfold=5, metrics={'mlogloss'})
-    # print(cv_results)
-    cv_results.to_csv('results/xgboost_epoch%s.csv'%(fileName))
-
-
+    # print("Start Cross Validation",time.ctime())
+    # cv_results=xgb.cv(params, xgbtrain, num_rounds, nfold=5, metrics={'mlogloss'})
+    # # print(cv_results)
+    # cv_results.to_csv('results/xgboost_epoch_%s.csv'%(fileName))
     print("Start Training",time.ctime())
-    watchlist = [ (xgbtrain,'train'), (dtest, 'test') ]
-    classifier = xgb.train(params, xgbtrain, num_rounds)
+    watchlist = [(xgbdev,'eval'), (xgbtrain,'train')]
+    evals_result = {}
+    classifier = xgb.train(params, xgbtrain, num_rounds, watchlist)
+
+
     print("Start Predicting",time.ctime())
 
     ans=classifier.predict(dtest)
     ansSize=ans.shape[0]
 
-    csvfile = 'results/xgboost-feature-submit%s.csv'%(fileName)
+    csvfile = 'results/xgboost-feature-submit_%s.csv'%(fileName)
     with open(csvfile, 'w') as output:
         predictions = []
 
@@ -203,7 +220,7 @@ def XG_boost(train,test,features):
     importance = classifier.get_fscore()
     importance = sorted(importance.items(), key=operator.itemgetter(1))
     df = pd.DataFrame(importance, columns=['feature', 'fscore'])
-    df.to_csv('results/importance%s.csv'%(fileName),index=False)
+    df.to_csv('results/importance_%s.csv'%(fileName),index=False)
 
 
 if __name__ == '__main__':

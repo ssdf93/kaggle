@@ -18,9 +18,6 @@ warnings.filterwarnings("ignore")
 
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 
-from keras.models import Model
-from keras.layers import Input, Dense, Dropout
-
 # import matplotlib.pyplot as plt
 
 
@@ -36,8 +33,13 @@ def load_data():
 
     print(data['shot_distance'].max())
 
-    train=data[data[target].notnull()]
-    test=data[data[target].isnull()]
+    train=data[data[target].notnull()].reset_index(drop=True)
+    test=data[data[target].isnull()].reset_index(drop=True)
+
+    print(train.info())
+
+
+    print(test.info())
 
     return data,train,test
 
@@ -66,8 +68,15 @@ def get_period(x):
     else:
         return "MidNight"
 
+def ireplace(x):
+    print(x)
+    return x.replace(' ','_')
+
 
 def data_processing(train,test):
+    # if os.path.exists('features/train_features.csv') and os.path.exists('features/test_features.csv')
+
+
     features=[]
     #deleted=[]
     for data in [train,test]:
@@ -79,6 +88,7 @@ def data_processing(train,test):
         data['season']=data['season'].apply(lambda x: int(x.split('-')[1]))
         data['is_host']=data['matchup'].apply(lambda x: 1 if '@' in x else 0)
         data['shot_type']=data['shot_type'].apply(lambda x: 1 if '2' in x else 0)
+        data['is_addTime']=data['period'].apply(lambda x:1 if x>4 else 0)
 
     # print(train['first_action_type'].unique())
 
@@ -117,13 +127,13 @@ def data_processing(train,test):
     #     test[col]=le.transform(test[col])
 
 
-    features+=['loc_x','loc_y','period','minutes_remaining','seconds_remaining','shot_distance','month','year','day','season','range','is_host','shot_type']
+    features+=['loc_x','loc_y','period','minutes_remaining','seconds_remaining','shot_distance','month','year','day','season','range','is_host','shot_type','is_addTime']
 
     #deleted=[,]
-    print(train.columns.tolist())
+    # print(train.columns.tolist())
     # print(train['Hook Shot'].unique())
 
-    print("Standard Scalaer",time.ctime())
+    print("MinMax Scaler",time.ctime())
     scaler=MinMaxScaler()
     for col in features:
         scaler.fit(list(train[col])+list(test[col]))
@@ -131,8 +141,10 @@ def data_processing(train,test):
         test[col]=scaler.transform(test[col])
 
     # print(train[features])
+    # train.to_csv("train_features.csv",index=None)
+    # test.to_csv("test_features.csv",index=None)
+    # print(features)
     return train,test,features
-
 
 
 def write_csv(file_name,ans,first_row=None,myId=None):
@@ -150,10 +162,9 @@ def write_csv(file_name,ans,first_row=None,myId=None):
 
         for i in range(ansSize):
             # import pdb;pdb.set_trace()
-            predictions += [[myId[i],ans[i][0]]]
+            predictions += [[myId[i],ans[i]]]
             if (i+1)%50000==0:
                 writer.writerows(predictions)
-                print(predictions[:5])
                 predictions=[]
 
         if predictions != None:
@@ -161,42 +172,67 @@ def write_csv(file_name,ans,first_row=None,myId=None):
 
         print("Writing CSV done",time.ctime())
 
-    # outfile = open('result/xgb.fmap', 'w')
-    # i = 0
-    # for feat in features:
-    #     outfile.write('{0}\t{1}\tq\n'.format(i, feat))
-    #     i = i + 1
-    # outfile.close()
-    # importance = classifier.get_fscore(fmap='result/xgb.fmap')
-    # importance = sorted(importance.items(), key=operator.itemgetter(1))
-    # df = pd.DataFrame(importance, columns=['feature', 'fscore'])
-    # df.to_csv('result/importance.csv',index=False)
 
 
+def XG_boost(train,test,features):
+    # params = {'max_depth':8, 'eta':0.05,'silent':1,
+    #           'objective':'binary:logistic', 'eval_metric': 'logloss',
+    #           'min_child_weight':3, 'subsample':0.6,'colsample_bytree':0.6, 'nthread':4}
 
-def nn(train,test,features):
 
-    features_cnt=len(features)
-    inputs=Input(shape=(features_cnt,))
-    dense1=Dense(100,activation='relu')(inputs)
-    dropout1=Dropout(0.5)(dense1)
-    outputs=Dense(1,activation='sigmoid')(dropout1)
-    model=Model(input=inputs,output=outputs)
-    model.compile(loss='binary_crossentropy', optimizer='sgd',metrics=['accuracy'])
+    #0.60061
+    # params = {'max_depth':8, 'eta':0.02,'silent':1,
+    #           'objective':'binary:logistic', 'eval_metric': 'logloss',
+    #           'min_child_weight':3, 'subsample':0.5,'colsample_bytree':0.5, 'nthread':4}
+    # num_rounds = 290
+
+    params = {'booster':'gblinear','silent':1,
+              'objective':'binary:logistic', 'eval_metric': 'logloss','lambda':1}
+    num_rounds = 320
+    n_samples=train.shape[0]
+    shuffled_index=np.arange(n_samples)
+    np.random.shuffle(shuffled_index)
+    train_index=shuffled_index[:int(n_samples*.7)]
+    dev_index=shuffled_index[int(n_samples*.7):]
+
+    print(train.shape,np.sum(train[target]==1))
+    # print(train.loc[train_index,features].shape)
+    dev=train.loc[dev_index,target]
+    print(dev.shape,np.sum(dev==1))
+
+    xgbtrain = xgb.DMatrix(train.loc[train_index,features], label=train.loc[train_index,target])
+    xgbdev = xgb.DMatrix(train.loc[dev_index,features], label=train.loc[dev_index,target])
+
+    dtest=xgb.DMatrix(test[features])
+    # print("Start Cross Validation",time.ctime())
+
+
+    # cv_results=xgb.cv(params, xgbtrain, num_rounds, nfold=5,metrics={'logloss'}, seed = 0)
+    # print(cv_results)
+    # cv_results.to_csv('models/epoch_score.csv')
     print("Start Training",time.ctime())
-    model.fit(train[features].values,train[target].values,batch_size=12,nb_epoch=100,validation_split=0.25)
 
-
+    watchlist = [(xgbdev,'eval'), (xgbtrain,'train')]
+    evals_result = {}
+    classifier = xgb.train(params, xgbtrain, num_rounds, watchlist)
 
     print("Start Predicting",time.ctime())
 
-    ans=model.predict(test[features].values)
+    ans=classifier.predict(dtest)
     print(ans)
     first_row="shot_id,shot_made_flag".split(',')
     myId=test['shot_id'].values
-    write_csv('results/nn-tanh-feature-submit.csv',ans,first_row,myId)
+    write_csv('results/xgboost-linear-feature-submit.csv',ans,first_row,myId)
 
+    classifier.dump_model('models/dump.raw.txt')
+    # xgb.plot_importance(classifier)
+    # print(classifier.get_fscore())
 
+    importance = classifier.get_fscore()
+    importance = sorted(importance.items(), key=operator.itemgetter(1))
+    print(importance)
+    df = pd.DataFrame(importance, columns=['feature', 'fscore'])
+    df.to_csv('models/importance.csv',index=False)
 
 
 if __name__ == '__main__':
@@ -204,4 +240,4 @@ if __name__ == '__main__':
     # iplot(data)
     print(test.head())
     train,test,features=data_processing(train,test)
-    nn(train,test,features)
+    XG_boost(train,test,features)
