@@ -19,6 +19,7 @@ from keras.layers.core import Dense, Dropout, Activation
 from keras.layers.normalization import BatchNormalization
 from keras.models import Sequential
 from keras.utils import np_utils
+from sklearn.svm import SVC
 
 
 sample = False
@@ -157,55 +158,42 @@ def data_processing(train,test):
 
     return train,test,features
 
-def build_model(input_dim,output_dim,hn=32,dp=0.5,layers=1):
-    model = Sequential()
 
-    model.add(Dense(output_dim=hn,input_dim=input_dim,init='uniform'))
-    print("hn=",hn)
-    model.add(Activation('relu'))
-    model.add(Dropout(dp))
+from sklearn.multiclass import OneVsRestClassifier
+from sklearn.svm import LinearSVC
+from sklearn.preprocessing import MultiLabelBinarizer
 
-    model.add(Dense(hn*2,init='uniform'))
-    model.add(Activation('relu'))
-    model.add(Dropout(dp))
+def SVM_model(train,test,features):
 
-    model.add(Dense(hn*2,init='uniform'))
-    model.add(Activation('relu'))
-    model.add(Dropout(dp))
 
-    model.add(Dense(hn,init='uniform'))
-    model.add(Activation('relu'))
-    model.add(Dropout(dp))
-
-    model.add(Dense(output_dim))
-    model.add(Activation('softmax'))
-
-    model.compile(loss='categorical_crossentropy', optimizer='adam',metrics=['accuracy'])
-    print(model.layers)
-    print("hn=",hn)
-    return model
-
-def NN(train,test,features):
-    EPOCHS = 50
-    BATCHES = 128
-    HN = 64
-    input_dim=len(features)
-    print(input_dim)
-    print(train[features].shape)
-    output_dim=39
-
-    model = build_model(input_dim, output_dim, HN)
 
     print("Start Training",time.ctime())
-    print(train[target].shape)
+
+
+    clf = OneVsRestClassifier(LinearSVC(C=1.0))
     X_train=train[features].values
-    y_train=np_utils.to_categorical(train[target].values)
-    model.fit(X_train,y_train, nb_epoch=EPOCHS, batch_size=BATCHES,show_accuracy=True,shuffle=True,verbose=2,validation_split=0.2)
+    y_train=train[target].values
+    clf.fit(X_train,y_train)
+
+
+
+    # clf.fit(X, y).predict(X)
+
+
     print("Start Predicting",time.ctime())
-    ans = model.predict_proba(test[features].values, verbose=0)
+
+    ans = clf.predict(test[features].values)
+    # mlb = MultiLabelBinarizer(list(range(39)))
+    # mlb.fit()
+    # ans = mlb.transform(ans)
+    ans = np_utils.to_categorical(ans,39)
+
+    print(ans)
     ansSize=ans.shape[0]
 
-    csvfile = 'results/keras-submit.csv'
+
+
+    csvfile = 'results/svm-submit.csv'
     with open(csvfile, 'w') as output:
         predictions = []
 
@@ -238,4 +226,4 @@ def NN(train,test,features):
 if __name__ == '__main__':
     train,test=load_data()
     train,test,features=data_processing(train,test)
-    NN(train,test,features)
+    SVM_model(train,test,features)

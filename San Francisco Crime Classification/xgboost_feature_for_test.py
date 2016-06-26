@@ -10,21 +10,15 @@ import time
 from sklearn.metrics import log_loss
 import operator
 import warnings
+import os
 warnings.filterwarnings("ignore")
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
-from keras.layers.advanced_activations import PReLU
-from keras.layers.core import Dense, Dropout, Activation
-from keras.layers.normalization import BatchNormalization
-from keras.models import Sequential
-from keras.utils import np_utils
-
-
 sample = False
 target='Category'
-# fileName='hadoop1_060223'
-fileName=''
+fileName='hadoop3_060416'
+
 def load_data():
     if sample:
         train = pd.read_csv("./data/train_min.csv")
@@ -85,6 +79,15 @@ def data_processing(train,test):
 
 
     features=[]
+    if os.path.exists("features/train_features.csv"):
+        train=pd.read_csv("features/train_features.csv")
+        test=pd.read_csv("features/test_features.csv")
+        ifile=open("features/features.csv",'r')
+        for line in ifile:
+            features.append(line.strip())
+        ifile.close()
+        print(features)
+        return train,test,features
 
     print("Adding Features",time.ctime())
 
@@ -121,18 +124,7 @@ def data_processing(train,test):
         train = pd.concat([train, train_encoded], axis=1)
         test = pd.concat([test,test_encoded],axis=1)
 
-    # way_name_dummies=pd.get_dummies(train['wayName'],prefix='wayName',columns=wayNames)
-    # features += list(way_name_dummies.columns)
-    # print(way_name_dummies.columns)
-    # train.join(way_name_dummies)
-    # way_name_dummies=pd.get_dummies(test['wayName'],prefix='wayName',columns=wayNames)
-    # test.join(way_name_dummies)
 
-    # print(train[['Address','StreetNo']])
-
-    # print("Filling NAs",time.ctime())
-    # train = train.fillna(train.median().iloc[0])
-    # test = test.fillna(test.median().iloc[0])
 
 
     print(train[features].head())
@@ -155,57 +147,50 @@ def data_processing(train,test):
         train[col]=scaler.transform(train[col])
         test[col]=scaler.transform(test[col])
 
+    train.to_csv("features/train_features.csv",index=None)
+    test.to_csv("features/test_features.csv",index=None)
+    ifile=open("features/features.csv",'w')
+    for feature in features:
+        ifile.write(feature+"\n")
+    ifile.close()
+
+
     return train,test,features
 
-def build_model(input_dim,output_dim,hn=32,dp=0.5,layers=1):
-    model = Sequential()
+def XG_boost(train,test,features):
+    params = {'max_depth':8, 'eta':0.1, 'silent':1,
+              'objective':'multi:softprob', 'num_class':39, 'eval_metric':'mlogloss',
+              'min_child_weight':3, 'subsample':0.5,'colsample_bytree':0.5}
+    num_rounds = 500
 
-    model.add(Dense(output_dim=hn,input_dim=input_dim,init='uniform'))
-    print("hn=",hn)
-    model.add(Activation('relu'))
-    model.add(Dropout(dp))
+    print(params.items())
+    print("num_rounds = ",num_rounds)
 
-    model.add(Dense(hn*2,init='uniform'))
-    model.add(Activation('relu'))
-    model.add(Dropout(dp))
 
-    model.add(Dense(hn*2,init='uniform'))
-    model.add(Activation('relu'))
-    model.add(Dropout(dp))
+    n_samples=train.shape[0]
+    shuffled_index=np.arange(n_samples)
+    np.random.shuffle(shuffled_index)
+    train_index=shuffled_index[:int(n_samples*.75)]
+    dev_index=shuffled_index[int(n_samples*.75):]
 
-    model.add(Dense(hn,init='uniform'))
-    model.add(Activation('relu'))
-    model.add(Dropout(dp))
+    xgbtrain = xgb.DMatrix(train.loc[train_index,features], label=train.loc[train_index,target])
+    xgbdev = xgb.DMatrix(train.loc[dev_index,features], label=train.loc[dev_index,target])
 
-    model.add(Dense(output_dim))
-    model.add(Activation('softmax'))
+    dtest=xgb.DMatrix(test[features])
 
-    model.compile(loss='categorical_crossentropy', optimizer='adam',metrics=['accuracy'])
-    print(model.layers)
-    print("hn=",hn)
-    return model
-
-def NN(train,test,features):
-    EPOCHS = 50
-    BATCHES = 128
-    HN = 64
-    input_dim=len(features)
-    print(input_dim)
-    print(train[features].shape)
-    output_dim=39
-
-    model = build_model(input_dim, output_dim, HN)
 
     print("Start Training",time.ctime())
-    print(train[target].shape)
-    X_train=train[features].values
-    y_train=np_utils.to_categorical(train[target].values)
-    model.fit(X_train,y_train, nb_epoch=EPOCHS, batch_size=BATCHES,show_accuracy=True,shuffle=True,verbose=2,validation_split=0.2)
+    watchlist = [(xgbdev,'eval'), (xgbtrain,'train')]
+    evals_result = {}
+    classifier = xgb.train(params, xgbtrain, num_rounds, watchlist)
+
+
     print("Start Predicting",time.ctime())
-    ans = model.predict_proba(test[features].values, verbose=0)
+
+    ans=classifier.predict(dtest)
     ansSize=ans.shape[0]
 
-    csvfile = 'results/keras-submit.csv'
+    csvfile = 'results/xgboost-feature-submit_%s.csv'%(fileName)
     with open(csvfile, 'w') as output:
         predictions = []
 
@@ -229,13 +214,13 @@ def NN(train,test,features):
         print("Predicting done",time.ctime())
 
 
-    # importance = classifier.get_fscore()
-    # importance = sorted(importance.items(), key=operator.itemgetter(1))
-    # df = pd.DataFrame(importance, columns=['feature', 'fscore'])
-    # df.to_csv('results/importance%s.csv'%(fileName),index=False)
+    importance = classifier.get_fscore()
+    importance = sorted(importance.items(), key=operator.itemgetter(1))
+    df = pd.DataFrame(importance, columns=['feature', 'fscore'])
+    df.to_csv('results/importance_%s.csv'%(fileName),index=False)
 
 
 if __name__ == '__main__':
     train,test=load_data()
     train,test,features=data_processing(train,test)
-    NN(train,test,features)
+    XG_boost(train,test,features)
