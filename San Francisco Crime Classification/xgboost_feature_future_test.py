@@ -14,10 +14,12 @@ import os
 warnings.filterwarnings("ignore")
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import confusion_matrix
 
 sample = False
 target='Category'
 fileName='hadoop3_060416'
+
 
 def load_data():
     if sample:
@@ -30,6 +32,8 @@ def load_data():
     # print(train.info())
     # print(test.info())
     # print(train['Category'].unique())
+    n_samples=train.shape[0]
+    print("haha",train.loc[int(n_samples*.3),:])
     return train,test
 
 
@@ -169,9 +173,12 @@ def XG_boost(train,test,features):
 
     n_samples=train.shape[0]
     shuffled_index=np.arange(n_samples)
-    np.random.shuffle(shuffled_index)
-    train_index=shuffled_index[:int(n_samples*.7)]
-    dev_index=shuffled_index[int(n_samples*.7):]
+    # np.random.shuffle(shuffled_index)
+
+    dev_index=shuffled_index[:int(n_samples*.3)]
+    train_index=shuffled_index[int(n_samples*.3):]
+
+    # print("haha",train.loc[dev_index[-1],features])
 
     xgbtrain = xgb.DMatrix(train.loc[train_index,features], label=train.loc[train_index,target])
     xgbdev = xgb.DMatrix(train.loc[dev_index,features], label=train.loc[dev_index,target])
@@ -192,6 +199,9 @@ def XG_boost(train,test,features):
     ans=classifier.predict(xgbdev)
 
     ytrue=xgbdev.get_label()
+    ypred=np.argmax(ans,axis=1)
+    matrix=confusion_matrix(ytrue,ypred)
+    print(matrix)
     ansSize=ans.shape[0]
     top1acc=0.0
     top3acc=0.0
